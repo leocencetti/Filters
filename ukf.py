@@ -2,7 +2,7 @@
 import numpy as np
 from scipy.linalg import sqrtm
 
-import models.ctrv_model as ctrv
+import models.old.ctrv_model as ctrv
 
 
 class UKF:
@@ -42,7 +42,7 @@ class UKF:
         self._state_transition = None
         self._postprocessing = lambda x: x
 
-        # initialize Noise
+        # initialize process Noise
         self.noise_covariance = None
 
         # compute auxiliary parameters
@@ -61,6 +61,7 @@ class UKF:
         Initializes the filter state
         :param numpy.ndarray initial_state_mean: initial state mean (x0)
         :param numpy.ndarray initial_state_covariance: initial state covariance
+        :param numpy.ndarray noise_covariance: process noise covariance
         """
         self.state_mean = initial_state_mean
         self.state_covariance = initial_state_covariance

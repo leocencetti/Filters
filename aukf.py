@@ -2,7 +2,7 @@
 import numpy as np
 from scipy.linalg import block_diag, sqrtm
 
-import models.actrv_model as actrv
+import models.old.actrv_model as actrv
 
 
 class AUKF:
