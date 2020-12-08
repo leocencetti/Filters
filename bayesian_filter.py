@@ -1,6 +1,4 @@
 # file created by Leonardo Cencetti on 11/23/20
-import numpy as np
-import pymc3 as pm
 
 
 class BayesianFilter:
