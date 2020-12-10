@@ -135,18 +135,18 @@ class AUKF:
             raise ValueError('Output transition not initialized. Call init_io(...) before running.')
 
         # run aukf
-        predicted_mean, predicted_covariance, predicted_sigma = self.predict(deltaT, self.aug_state_mean,
-                                                                             self.aug_state_covariance)
+        predicted_mean, predicted_covariance, predicted_sigma = self._predict(deltaT, self.aug_state_mean,
+                                                                              self.aug_state_covariance)
 
-        self.state_mean, self.state_covariance = self.correct(predicted_mean, predicted_covariance,
-                                                              measurement_mean, measurement_covariance)
+        self.state_mean, self.state_covariance = self._correct(predicted_mean, predicted_covariance, measurement_mean,
+                                                               measurement_covariance)
         # update augmented state
         self.aug_state_mean = np.concatenate((self.state_mean, self.noise_mean))
         self.state_covariance = block_diag(self.state_covariance, self.noise_covariance)
 
         return self.state_mean, self.state_covariance
 
-    def predict(self, deltaT: float, aug_mean: np.ndarray, aug_covariance: np.ndarray):
+    def _predict(self, deltaT: float, aug_mean: np.ndarray, aug_covariance: np.ndarray):
         """
         Performs the prediction step
         :param float deltaT: time step in seconds
@@ -155,7 +155,7 @@ class AUKF:
         :returns: predicted_state, predicted_covariance, predicted_sigma_points
         """
         # compute sigma points
-        sigma_points = self.compute_sigma_point(aug_mean, aug_covariance, self._L + self._lambda)
+        sigma_points = self._compute_sigma_point(aug_mean, aug_covariance, self._L + self._lambda)
         # time update
         next_sigma_points = np.zeros([self._state_dimension, self._sigma_dimension])
         for ii in range(self._sigma_dimension):
@@ -167,7 +167,7 @@ class AUKF:
         next_state_covariance = np.multiply(temp, self._c_weights.T) @ temp.T
         return next_state_mean, next_state_covariance, next_sigma_points
 
-    def correct(self, predicted_state_mean: np.ndarray, predicted_state_covariance: np.ndarray,
+    def _correct(self, predicted_state_mean: np.ndarray, predicted_state_covariance: np.ndarray,
                 measurement_mean: np.ndarray, measurement_covariance: np.ndarray):
         """
         Performs the correction step
@@ -180,7 +180,7 @@ class AUKF:
         # Augment state and covariance
         new_mean = np.concatenate((predicted_state_mean, np.zeros((self._noise_dimension, 1))))
         new_cov = block_diag(predicted_state_covariance, np.eye(self._noise_dimension))
-        next_sigma_points = self.compute_sigma_point(new_mean, new_cov, self._L + self._lambda)
+        next_sigma_points = self._compute_sigma_point(new_mean, new_cov, self._L + self._lambda)
         # Slice sigma points (take state rows)
         next_sigma_points = next_sigma_points[:self._state_dimension, :]
 
@@ -208,7 +208,7 @@ class AUKF:
         return state_mean_estimate, state_covariance_estimate
 
     @staticmethod
-    def compute_sigma_point(mean: np.ndarray, covariance: np.ndarray, coefficient: float):
+    def _compute_sigma_point(mean: np.ndarray, covariance: np.ndarray, coefficient: float):
         """
         Computes the sigma point matrix
         :param numpy.ndarray mean: state mean
