@@ -1,6 +1,6 @@
 # file created by Leonardo Cencetti on 11/24/20
 import numpy as np
-from scipy.linalg import sqrtm
+from scipy.linalg import cholesky
 
 import models.old.ctrv_model as ctrv
 
@@ -120,7 +120,7 @@ class UKF:
         if not self._io_initialized:
             raise ValueError('Output transition not initialized. Call init_io(...) before running.')
 
-        # run aukf
+        # run ukf
         predicted_mean, predicted_covariance, predicted_sigma = self._predict(deltaT, self.state_mean,
                                                                               self.state_covariance)
 
@@ -151,7 +151,7 @@ class UKF:
         return next_state_mean, next_state_covariance, next_sigma_points
 
     def _correct(self, predicted_state_mean: np.ndarray, predicted_state_covariance: np.ndarray,
-                measurement_mean: np.ndarray, measurement_covariance: np.ndarray):
+                 measurement_mean: np.ndarray, measurement_covariance: np.ndarray):
         """
         Performs the correction step
         :param numpy.ndarray predicted_state_mean: predicted state of the current step
@@ -196,7 +196,7 @@ class UKF:
         :param float coefficient: scaling coefficient
         :return: sigma_points
         """
-        temp = np.real(sqrtm(np.multiply(covariance, coefficient)))
+        temp = cholesky(np.multiply(covariance, coefficient), lower=True)
         mean = mean.reshape(-1, 1)
         sigma_points = np.concatenate([mean, mean + temp, mean - temp], axis=1)
         return sigma_points
