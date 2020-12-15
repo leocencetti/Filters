@@ -1,6 +1,6 @@
 # file created by Leonardo Cencetti on 11/24/20
 import numpy as np
-from scipy.linalg import block_diag, sqrtm
+from scipy.linalg import block_diag, cholesky
 
 
 class AUKF:
@@ -185,7 +185,7 @@ class AUKF:
         output_sigma_points = np.zeros((self._output_dimension, self._sigma_dimension))
 
         for ii in range(self._sigma_dimension):
-            output_sigma_points[:, ii] = self._output_transition(next_sigma_points[:, ii])
+            output_sigma_points[:, ii] = self._output_transition(next_sigma_points[:, ii]).squeeze()
 
         output_mean = output_sigma_points @ self._m_weights
 
@@ -214,7 +214,7 @@ class AUKF:
         :param float coefficient: scaling coefficient
         :return: sigma_points
         """
-        temp = np.real(sqrtm(np.multiply(covariance, coefficient)))
+        temp = cholesky(np.multiply(covariance, coefficient), lower=True)
         mean = mean.reshape(-1, 1)
         sigma_points = np.concatenate([mean, mean + temp, mean - temp], axis=1)
         return sigma_points
