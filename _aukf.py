@@ -1,20 +1,19 @@
 # file created by Leonardo Cencetti on 11/24/20
 import numpy as np
-from scipy.linalg import cholesky
-
-import models.old.ctrv_model as ctrv
+from scipy.linalg import block_diag, sqrtm
 
 
-class UKF:
+class AUKF:
     """
     Augmented Kalman Filter implementation
     """
 
-    def __init__(self, state_dimension: int, output_dimension: int, alpha: float = 1,
+    def __init__(self, state_dimension: int, noise_dimension: int, output_dimension: int, alpha: float = 1,
                  beta: float = 2, kappa: float = 0):
         """
         Initializes the filter
         :param int state_dimension: dimension of the state
+        :param int noise_dimension: dimension of the process noise
         :param int output_dimension: dimension of the state output (as in Y = A*X)
         :param float alpha: scaling parameter. Determines the spread of the sigma points around the mean state value.
             It is usually a small positive value. The spread of sigma points is proportional to α.
@@ -27,8 +26,9 @@ class UKF:
         """
         # initialize dimensions
         self._state_dimension = state_dimension
+        self._noise_dimension = noise_dimension
         self._output_dimension = output_dimension
-        self._L = self._state_dimension
+        self._L = self._state_dimension + self._noise_dimension
         self._sigma_dimension = 2 * self._L + 1
 
         # initialize filter state
@@ -42,8 +42,13 @@ class UKF:
         self._state_transition = None
         self._postprocessing = lambda x: x
 
-        # initialize process Noise
+        # initialize noise
+        self.noise_mean = None
         self.noise_covariance = None
+
+        # initialize sigma dimension
+        self.aug_state_mean = None
+        self.aug_state_covariance = None
 
         # compute auxiliary parameters
         self._lambda = alpha ** 2 * (self._L + kappa) - self._L
@@ -56,16 +61,22 @@ class UKF:
         self._c_weights[0] += 1 - alpha ** 2 + beta
 
     def init_state(self, initial_state_mean: np.ndarray, initial_state_covariance: np.ndarray,
-                   noise_covariance: np.ndarray):
+                   initial_noise_mean: np.ndarray, initial_noise_covariance: np.ndarray):
         """
         Initializes the filter state
         :param numpy.ndarray initial_state_mean: initial state mean (x0)
         :param numpy.ndarray initial_state_covariance: initial state covariance
-        :param numpy.ndarray noise_covariance: process noise covariance
+        :param numpy.ndarray initial_noise_mean: initial process noise mean
+        :param numpy.ndarray initial_noise_covariance: initial process noise covariance
         """
         self.state_mean = initial_state_mean
         self.state_covariance = initial_state_covariance
-        self.noise_covariance = noise_covariance
+        self.noise_mean = initial_noise_mean
+        self.noise_covariance = initial_noise_covariance
+
+        # initialize augmented state
+        self.aug_state_mean = np.concatenate((self.state_mean, self.noise_mean))
+        self.aug_state_covariance = block_diag(self.state_covariance, self.noise_covariance)
 
         self._state_initialized = True
 
@@ -77,7 +88,7 @@ class UKF:
             ```python
             state_transition(
                 delta_t: float,
-                current_state: numpy.ndarray[state_dimension, 1]
+                current_augmented_state: numpy.ndarray[augmented_state_dimension, 1]
             ) -> numpy.ndarray[state_dimension, 1]
             ```
         :param callable output_transition: output transition function, equivalent to C matrix. Takes the current state
@@ -105,7 +116,8 @@ class UKF:
         Resets the filter to its initial conditions
         """
         self._state_initialized = self._io_initialized = False
-        self.state_covariance = self.state_mean = None
+        self.state_covariance = self.noise_mean = self.noise_covariance = \
+            self.aug_state_mean = self.aug_state_covariance = None
 
     def step(self, deltaT: float, measurement_mean: np.ndarray, measurement_covariance: np.ndarray):
         """
@@ -120,25 +132,28 @@ class UKF:
         if not self._io_initialized:
             raise ValueError('Output transition not initialized. Call init_io(...) before running.')
 
-        # run ukf
-        predicted_mean, predicted_covariance, predicted_sigma = self._predict(deltaT, self.state_mean,
-                                                                              self.state_covariance)
+        # run aukf
+        predicted_mean, predicted_covariance, predicted_sigma = self._predict(deltaT, self.aug_state_mean,
+                                                                              self.aug_state_covariance)
 
         self.state_mean, self.state_covariance = self._correct(predicted_mean, predicted_covariance, measurement_mean,
                                                                measurement_covariance)
+        # update augmented state
+        self.aug_state_mean = np.concatenate((self.state_mean, self.noise_mean))
+        self.state_covariance = block_diag(self.state_covariance, self.noise_covariance)
 
         return self.state_mean, self.state_covariance
 
-    def _predict(self, deltaT: float, mean: np.ndarray, covariance: np.ndarray):
+    def _predict(self, deltaT: float, aug_mean: np.ndarray, aug_covariance: np.ndarray):
         """
         Performs the prediction step
         :param float deltaT: time step in seconds
-        :param numpy.ndarray mean: state of previous step
-        :param numpy.ndarray covariance: state covariance of previous step
+        :param numpy.ndarray aug_mean: augmented state of previous step
+        :param numpy.ndarray aug_covariance: augmented state covariance of previous step
         :returns: predicted_state, predicted_covariance, predicted_sigma_points
         """
         # compute sigma points
-        sigma_points = self._compute_sigma_point(mean, covariance, self._L + self._lambda)
+        sigma_points = self._compute_sigma_point(aug_mean, aug_covariance, self._L + self._lambda)
         # time update
         next_sigma_points = np.zeros([self._state_dimension, self._sigma_dimension])
         for ii in range(self._sigma_dimension):
@@ -147,7 +162,7 @@ class UKF:
         next_state_mean = self._postprocessing(next_sigma_points @ self._m_weights)
 
         temp = next_sigma_points - next_state_mean
-        next_state_covariance = np.multiply(temp, self._c_weights.T) @ temp.T + self.noise_covariance
+        next_state_covariance = np.multiply(temp, self._c_weights.T) @ temp.T
         return next_state_mean, next_state_covariance, next_sigma_points
 
     def _correct(self, predicted_state_mean: np.ndarray, predicted_state_covariance: np.ndarray,
@@ -160,9 +175,12 @@ class UKF:
         :param numpy.ndarray measurement_covariance: new measurement covariance matrix
         :returns: state_estimate, state_covariance_estimate
         """
-
-        next_sigma_points = self._compute_sigma_point(predicted_state_mean, predicted_state_covariance,
-                                                      self._L + self._lambda)
+        # Augment state and covariance
+        new_mean = np.concatenate((predicted_state_mean, np.zeros((self._noise_dimension, 1))))
+        new_cov = block_diag(predicted_state_covariance, np.eye(self._noise_dimension))
+        next_sigma_points = self._compute_sigma_point(new_mean, new_cov, self._L + self._lambda)
+        # Slice sigma points (take state rows)
+        next_sigma_points = next_sigma_points[:self._state_dimension, :]
 
         output_sigma_points = np.zeros((self._output_dimension, self._sigma_dimension))
 
@@ -196,7 +214,7 @@ class UKF:
         :param float coefficient: scaling coefficient
         :return: sigma_points
         """
-        temp = cholesky(np.multiply(covariance, coefficient), lower=True)
+        temp = np.real(sqrtm(np.multiply(covariance, coefficient)))
         mean = mean.reshape(-1, 1)
         sigma_points = np.concatenate([mean, mean + temp, mean - temp], axis=1)
         return sigma_points
