@@ -5,7 +5,7 @@ from scipy.linalg import cholesky
 
 class UKF:
     """
-    Augmented Kalman Filter implementation
+    Unscented Kalman Filter
     """
 
     def __init__(self, state_dimension: int, output_dimension: int, alpha: float = 1,

@@ -5,7 +5,7 @@ from scipy.linalg import block_diag, cholesky
 
 class AUKF:
     """
-    Augmented Kalman Filter implementation
+    Augmented Unscented Kalman Filter
     """
 
     def __init__(self, state_dimension: int, noise_dimension: int, output_dimension: int, alpha: float = 1,
