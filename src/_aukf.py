@@ -214,7 +214,7 @@ class AUKF:
         :param float coefficient: scaling coefficient
         :return: sigma_points
         """
-        temp = cholesky(np.multiply(covariance, coefficient), lower=True)
+        temp = cholesky(np.multiply(covariance, coefficient))
         mean = mean.reshape(-1, 1)
         sigma_points = np.concatenate([mean, mean + temp, mean - temp], axis=1)
         return sigma_points
