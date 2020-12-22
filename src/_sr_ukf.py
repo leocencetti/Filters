@@ -3,7 +3,7 @@ from math import sqrt
 
 import numpy as np
 from scipy.linalg import cholesky, sqrtm
-
+from utils.decorators import is_finite
 
 class SRUKF:
     """
@@ -186,8 +186,11 @@ class SRUKF:
         cross_covariance = np.multiply(next_sigma_points - predicted_state_mean, self._c_weights.T) @ (
                 output_sigma_points - output_mean).T
 
+        if not is_finite(output_covariance, cross_covariance):
+            print('Something is not finite!')
         # compute Kalman gain
-        kalman_gain = np.linalg.lstsq(np.linalg.lstsq(output_covariance, cross_covariance.T)[0], output_covariance.T)[0]
+        kalman_gain = np.linalg.lstsq(output_covariance.T, np.linalg.lstsq(output_covariance, cross_covariance.T, rcond=None)[0], rcond=None)[
+            0].T
 
         state_mean_estimate = self._postprocessing(
             predicted_state_mean + kalman_gain @ (measurement_mean - output_mean))
@@ -195,9 +198,9 @@ class SRUKF:
         U = kalman_gain @ output_covariance
 
         # Cholesky rank-1 downdate with each column of U
-        state_covariance_estimate = predicted_state_covariance
+        state_covariance_estimate = predicted_state_covariance.copy()
         for ii in range(U.shape[1]):
-            state_covariance_estimate = self.cholupdate(state_covariance_estimate, U[:, ii], -1)
+            state_covariance_estimate = self.cholupdate(state_covariance_estimate.copy(), U[:, ii].copy(), -1)
 
         return state_mean_estimate, state_covariance_estimate
 
