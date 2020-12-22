@@ -146,8 +146,8 @@ class SRUKF:
 
         next_state_mean = self._postprocessing(next_sigma_points @ self._m_weights)
 
-        temp = np.zeros([25, 51])
-        for i in range(51):
+        temp = np.zeros([self._state_dimension, self._sigma_dimension])
+        for i in range(self._sigma_dimension):
             temp[:, i] = np.subtract(next_sigma_points[:, i], next_state_mean[:, 0])
         next_state_covariance = np.linalg.qr(
             np.concatenate([sqrt(self._c_weights[1]) * temp[:, 1:], sqrtm(self.noise_covariance)], axis=1).T,
@@ -226,7 +226,7 @@ class SRUKF:
         """
         n = len(x);
         for k in range(n):
-            r = sqrt(L[k, k] ** 2 + factor * x[k] ** 2)
+            r = np.sqrt(L[k, k] ** 2 + factor * x[k] ** 2)
             c = r / L[k, k]
             s = x[k] / L[k, k]
             L[k, k] = r

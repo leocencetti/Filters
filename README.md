@@ -5,7 +5,8 @@ Generalized implementation of some flavours of Bayesian Filters.
 This package provides the following filters:
 
 - Augmented Unscented Kalman Filter (AUKF)
-- Unscented Kalman Filter
+- Unscented Kalman Filter (UKF)
+- Square Root Unscented Kalman Filter (SRUKF)
 
 ## Usage
 

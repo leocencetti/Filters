@@ -1,5 +1,5 @@
 # File created by Leonardo Cencetti on 12/17/20
-from filters import UKF
+from filters import UKF, SRUKF
 import numpy as np
 import models.old.ctrv_model as ctrv
 
@@ -9,7 +9,7 @@ if __name__ == '__main__':
     state_dim = 6  # number of state
     output_dim = 3  # number of outputs
 
-    kf = UKF(state_dim, output_dim)
+    kf = SRUKF(state_dim, output_dim)
 
     initialState = np.array([[10, 12, 0, 0, 1.5, 0.35]]).T  # initial state
     initialCovariance = 1e-4 * np.eye(state_dim)  # initial state covariance
