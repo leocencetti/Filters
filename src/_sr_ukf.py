@@ -1,11 +1,13 @@
 # file created by Leonardo Cencetti on 11/24/20
+from math import sqrt
+
 import numpy as np
 from scipy.linalg import cholesky, sqrtm
 
 
-class UKF:
+class SRUKF:
     """
-    Unscented Kalman Filter
+    Square Root Unscented Kalman Filter
     """
 
     def __init__(self, state_dimension: int, output_dimension: int, alpha: float = 1,
@@ -62,7 +64,7 @@ class UKF:
         :param numpy.ndarray noise_covariance: process noise covariance
         """
         self.state_mean = initial_state_mean
-        self.state_covariance = initial_state_covariance
+        self.state_covariance = cholesky(initial_state_covariance)
         self.noise_covariance = noise_covariance
 
         self._state_initialized = True
@@ -144,8 +146,13 @@ class UKF:
 
         next_state_mean = self._postprocessing(next_sigma_points @ self._m_weights)
 
-        temp = next_sigma_points - next_state_mean
-        next_state_covariance = np.multiply(temp, self._c_weights.T) @ temp.T + self.noise_covariance
+        temp = np.zeros([25, 51])
+        for i in range(51):
+            temp[:, i] = np.subtract(next_sigma_points[:, i], next_state_mean[:, 0])
+        next_state_covariance = np.linalg.qr(
+            np.concatenate([sqrt(self._c_weights[1]) * temp[:, 1:], sqrtm(self.noise_covariance)], axis=1).T,
+            mode='r')
+        next_state_covariance = self.cholupdate(next_state_covariance, temp[:, 0], self._c_weights[0, 0])
         return next_state_mean, next_state_covariance, next_sigma_points
 
     def _correct(self, predicted_state_mean: np.ndarray, predicted_state_covariance: np.ndarray,
@@ -171,17 +178,26 @@ class UKF:
 
         # measurement update
         temp = output_sigma_points - output_mean
-        output_covariance = np.multiply(temp, self._c_weights.T) @ temp.T + measurement_covariance
+        output_covariance = np.linalg.qr(
+            np.concatenate([sqrt(self._c_weights[1]) * temp, sqrtm(measurement_covariance)], axis=1).T,
+            mode='r')
+        output_covariance = self.cholupdate(output_covariance, temp[:, 0], self._c_weights[0, 0])
 
         cross_covariance = np.multiply(next_sigma_points - predicted_state_mean, self._c_weights.T) @ (
                 output_sigma_points - output_mean).T
 
         # compute Kalman gain
-        kalman_gain = np.linalg.solve(output_covariance.T, cross_covariance.T).T
+        kalman_gain = np.linalg.lstsq(np.linalg.lstsq(output_covariance, cross_covariance.T)[0], output_covariance.T)[0]
 
         state_mean_estimate = self._postprocessing(
             predicted_state_mean + kalman_gain @ (measurement_mean - output_mean))
-        state_covariance_estimate = predicted_state_covariance - kalman_gain @ output_covariance @ kalman_gain.T
+
+        U = kalman_gain @ output_covariance
+
+        # Cholesky rank-1 downdate with each column of U
+        state_covariance_estimate = predicted_state_covariance
+        for ii in range(U.shape[1]):
+            state_covariance_estimate = self.cholupdate(state_covariance_estimate, U[:, ii], -1)
 
         return state_mean_estimate, state_covariance_estimate
 
@@ -194,7 +210,27 @@ class UKF:
         :param float coefficient: scaling coefficient
         :return: sigma_points
         """
-        temp = cholesky(np.multiply(covariance, coefficient), lower=True)
         mean = mean.reshape(-1, 1)
-        sigma_points = np.concatenate([mean, mean + temp, mean - temp], axis=1)
+        sigma_points = np.concatenate(
+            [mean, mean + sqrt(coefficient) * covariance, mean - sqrt(coefficient) * covariance], axis=1)
         return sigma_points
+
+    @staticmethod
+    def cholupdate(L: np.ndarray, x: np.ndarray, factor=+1):
+        """
+        Performs a rank-1 update (or downdate)
+        :param numpy.ndarray L: original Cholesky factorization of shape (M, M)
+        :param numpy.ndarray x: update column vector of shape (M,1) or (M,)
+        :param float factor: scaling factor. The sign determines if it's an update (+) or downdate(-)
+        :return: updated Cholesky factor
+        """
+        n = len(x);
+        for k in range(n):
+            r = sqrt(L[k, k] ** 2 + factor * x[k] ** 2)
+            c = r / L[k, k]
+            s = x[k] / L[k, k]
+            L[k, k] = r
+            if k < n:
+                L[k + 1:n, k] = (L[k + 1:n, k] + factor * s * x[k + 1:n]) / c
+                x[k + 1:n] = c * x[k + 1:n] - s * L[k + 1:n, k]
+        return L
