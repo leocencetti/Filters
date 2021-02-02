@@ -165,7 +165,7 @@ class UKF:
         output_sigma_points = np.zeros((self._output_dimension, self._sigma_dimension))
 
         for ii in range(self._sigma_dimension):
-            output_sigma_points[:, ii] = self._output_transition(next_sigma_points[:, ii]).squeeze()
+            output_sigma_points[:, ii] = self._output_transition(next_sigma_points[:, ii, None]).squeeze()
 
         output_mean = output_sigma_points @ self._m_weights
 
