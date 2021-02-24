@@ -3,7 +3,10 @@ from math import sqrt
 
 import numpy as np
 from scipy.linalg import cholesky, sqrtm
+
+from .rank_1 import update, downdate
 from utils.decorators import is_finite
+
 
 class SRUKF:
     """
@@ -64,7 +67,7 @@ class SRUKF:
         :param numpy.ndarray noise_covariance: process noise covariance
         """
         self.state_mean = initial_state_mean
-        self.state_covariance = cholesky(initial_state_covariance)
+        self.state_covariance = cholesky(initial_state_covariance, lower=True)
         self.noise_covariance = noise_covariance
 
         self._state_initialized = True
@@ -125,7 +128,7 @@ class SRUKF:
                                                                               self.state_covariance)
 
         self.state_mean, self.state_covariance = self._correct(predicted_mean, predicted_covariance, measurement_mean,
-                                                               measurement_covariance)
+                                                               measurement_covariance, predicted_sigma)
 
         return self.state_mean, self.state_covariance
 
@@ -146,17 +149,15 @@ class SRUKF:
 
         next_state_mean = self._postprocessing(next_sigma_points @ self._m_weights)
 
-        temp = np.zeros([self._state_dimension, self._sigma_dimension])
-        for i in range(self._sigma_dimension):
-            temp[:, i] = np.subtract(next_sigma_points[:, i], next_state_mean[:, 0])
+        temp = next_sigma_points - next_state_mean
         next_state_covariance = np.linalg.qr(
-            np.concatenate([sqrt(self._c_weights[1]) * temp[:, 1:], sqrtm(self.noise_covariance)], axis=1).T,
+            np.concatenate([sqrt(self._c_weights.item(1)) * temp[:, 1:], sqrtm(self.noise_covariance)], axis=1).T,
             mode='r')
-        next_state_covariance = self.cholupdate(next_state_covariance, temp[:, 0], self._c_weights[0, 0])
+        next_state_covariance = self.cholupdate(next_state_covariance, temp[:, 0], self._c_weights.item(0))
         return next_state_mean, next_state_covariance, next_sigma_points
 
     def _correct(self, predicted_state_mean: np.ndarray, predicted_state_covariance: np.ndarray,
-                 measurement_mean: np.ndarray, measurement_covariance: np.ndarray):
+                 measurement_mean: np.ndarray, measurement_covariance: np.ndarray, next_sigma_points: np.ndarray):
         """
         Performs the correction step
         :param numpy.ndarray predicted_state_mean: predicted state of the current step
@@ -166,31 +167,35 @@ class SRUKF:
         :returns: state_estimate, state_covariance_estimate
         """
 
-        next_sigma_points = self._compute_sigma_point(predicted_state_mean, predicted_state_covariance,
-                                                      self._L + self._lambda)
+        next_sigma_points = np.concatenate([next_sigma_points,
+                                            self._compute_sigma_point(next_sigma_points[:, 0],
+                                                                      sqrtm(self.noise_covariance),
+                                                                      self._L + self._lambda)[:, 1:]], axis=1)
 
-        output_sigma_points = np.zeros((self._output_dimension, self._sigma_dimension))
-
+        output_sigma_points = np.zeros((self._output_dimension, 2 * self._sigma_dimension - 1))
         for ii in range(self._sigma_dimension):
-            output_sigma_points[:, ii] = self._output_transition(next_sigma_points[:, ii]).squeeze()
+            output_sigma_points[:, ii] = self._output_transition(next_sigma_points[:, ii, None]).squeeze()
 
-        output_mean = output_sigma_points @ self._m_weights
+        extended_m_weights = np.concatenate([self._m_weights, self._m_weights[1:]], axis=0)
+        output_mean = output_sigma_points @ extended_m_weights
 
         # measurement update
         temp = output_sigma_points - output_mean
         output_covariance = np.linalg.qr(
-            np.concatenate([sqrt(self._c_weights[1]) * temp, sqrtm(measurement_covariance)], axis=1).T,
+            np.concatenate([sqrt(self._c_weights.item(1)) * temp[:, 1:], sqrtm(measurement_covariance)], axis=1).T,
             mode='r')
-        output_covariance = self.cholupdate(output_covariance, temp[:, 0], self._c_weights[0, 0])
-
-        cross_covariance = np.multiply(next_sigma_points - predicted_state_mean, self._c_weights.T) @ (
+        output_covariance = self.cholupdate(output_covariance, temp[:, 0], self._c_weights.item(0))
+        extended_c_weights = np.concatenate([self._c_weights, self._c_weights[1:]], axis=0)
+        cross_covariance = np.multiply(next_sigma_points - predicted_state_mean, extended_c_weights.T) @ (
                 output_sigma_points - output_mean).T
 
         if not is_finite(output_covariance, cross_covariance):
             print('Something is not finite!')
         # compute Kalman gain
-        kalman_gain = np.linalg.lstsq(output_covariance.T, np.linalg.lstsq(output_covariance, cross_covariance.T, rcond=None)[0], rcond=None)[
-            0].T
+        kalman_gain = \
+            np.linalg.lstsq(output_covariance.T, np.linalg.lstsq(output_covariance, cross_covariance.T, rcond=None)[0],
+                            rcond=None)[
+                0].T
 
         state_mean_estimate = self._postprocessing(
             predicted_state_mean + kalman_gain @ (measurement_mean - output_mean))
@@ -219,7 +224,7 @@ class SRUKF:
         return sigma_points
 
     @staticmethod
-    def cholupdate(L: np.ndarray, x: np.ndarray, factor=+1):
+    def cholupdate1(L: np.ndarray, x: np.ndarray, factor=+1):
         """
         Performs a rank-1 update (or downdate)
         :param numpy.ndarray L: original Cholesky factorization of shape (M, M)
@@ -227,13 +232,39 @@ class SRUKF:
         :param float factor: scaling factor. The sign determines if it's an update (+) or downdate(-)
         :return: updated Cholesky factor
         """
-        n = len(x);
-        for k in range(n):
-            r = np.sqrt(L[k, k] ** 2 + factor * x[k] ** 2)
+        sign = np.sign(factor)
+        factor = sqrt(abs(factor))
+        L = L + sign * factor * x @ x.T
+        return L
+
+    @staticmethod
+    def cholupdate2(L: np.ndarray, x: np.ndarray, factor=+1):
+        """
+        Performs a rank-1 update (or downdate)
+        :param numpy.ndarray L: original Cholesky factorization of shape (M, M)
+        :param numpy.ndarray x: update column vector of shape (M,1) or (M,)
+        :param float factor: scaling factor. The sign determines if it's an update (+) or downdate(-)
+        :return: updated Cholesky factor
+        """
+        N = len(x)
+        sign = np.sign(factor)
+        factor = pow(abs(factor), 0.25)
+        x *= factor
+        for k in range(N):
+            r = np.sqrt(L[k, k] ** 2 + sign * x[k] ** 2)
             c = r / L[k, k]
             s = x[k] / L[k, k]
             L[k, k] = r
-            if k < n:
-                L[k + 1:n, k] = (L[k + 1:n, k] + factor * s * x[k + 1:n]) / c
-                x[k + 1:n] = c * x[k + 1:n] - s * L[k + 1:n, k]
+            if k < N - 1:
+                L[k + 1:N - 1, k] = (L[k + 1:N - 1, k] + sign * s * x[k + 1:N - 1]) / c
+                x[k + 1:N - 1] = c * x[k + 1:N - 1] - s * L[k + 1:N - 1, k]
         return L
+
+    @staticmethod
+    def cholupdate(L: np.ndarray, x: np.ndarray, factor=+1):
+
+        if factor > 0:
+            R = update(L, pow(factor, 0.25) * x)
+        else:
+            R = downdate(L, pow(abs(factor), 0.25) * x)
+        return R
